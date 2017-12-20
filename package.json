@@ -1,11 +1,18 @@
 {
   "name": "publish-to-qiniu",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "根据配置上传资源到七牛",
   "bin": {
     "publish-to-qiniu": "bin/cli.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:butsalt/publish-to-qiniu.git"
+  },
+  "keywords": [
+    "qiniu",
+    "refresh"
+  ],
   "author": "butSalt",
   "license": "MIT",
   "dependencies": {
