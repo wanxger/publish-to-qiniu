@@ -77,15 +77,18 @@ Promise
             );
           }
         )
+      )
+      .then(
+        () => {
+          spinner
+            .succeed(`Load files successed, ${fileMap.size} founded`);
+        }
       );
     }
   )
   .then(
     // 计算所有文件的hash
     () => {
-      spinner
-        .succeed(`Load files successed, ${fileMap.size} founded`);
-
       spinner = ora('Checking files status')
         .start();
       return Promise.all(
