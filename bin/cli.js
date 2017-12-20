@@ -139,7 +139,9 @@ Promise
                       });
                       return;
                     }
-                    if (respInfo.statusCode !== 200) {
+                    if (
+                      parseInt(respInfo.statusCode / 100) !== 2
+                    ) {
                       reject({
                         message: `Check files status failed, code ${respInfo.statusCode}`,
                         error: respBody
@@ -184,6 +186,11 @@ Promise
     filePaths => {
       spinner = ora('Uploading files')
         .start();
+
+      if (filePaths.length === 0) {
+        spinner.info('Upload files skipped');
+        return [];
+      }
 
       const config = new qiniu.conf.Config();
       const formUploader = new qiniu.form_up.FormUploader(config);
@@ -252,6 +259,11 @@ Promise
     filePaths => {
       spinner = ora('Refreshing urls')
         .start();
+      
+      if (filePaths.length === 0) {
+        spinner.info('Refresh urls skipped');
+        return;
+      }
 
       const urls = [];
       filePaths
@@ -302,12 +314,14 @@ Promise
         )
       }
 
-      return tasks;
-    }
-  )
-  .then(
-    () => {
-      spinner.succeed('Refresh urls successed');
+      return Promise.all(
+        tasks
+      )
+      .then(
+        () => {
+          spinner.succeed('Refresh urls successed');
+        }
+      );
     }
   )
   .catch(
