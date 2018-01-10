@@ -197,7 +197,6 @@ Promise
 
       const config = new qiniu.conf.Config();
       const formUploader = new qiniu.form_up.FormUploader(config);
-      const putExtra = new qiniu.form_up.PutExtra();
 
       const resFilePaths = [];
 
@@ -225,7 +224,7 @@ Promise
                     uploadToken,
                     file.distPath,
                     file.srcPath,
-                    putExtra,
+                    new qiniu.form_up.PutExtra(),
                     (err, respBody, respInfo) => {
                       if (err) {
                         reject({
