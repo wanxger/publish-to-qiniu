@@ -20,6 +20,8 @@ const { accessKey, secretKey, bucket, hosts, tasks } = require(path.join(workspa
 
 var mac = new qiniu.auth.digest.Mac(accessKey, secretKey);
 
+let zone;
+
 const fileMap = new Map();
 
 let spinner;
@@ -27,10 +29,41 @@ let spinner;
 Promise
   .resolve()
   .then(
+    () => {
+      spinner = ora('Determining zone')
+        .start();
+      return new Promise(
+        (resolve, reject) => {
+          qiniu.zone.getZoneInfo(
+            accessKey,
+            bucket,
+            (err, zoneInfo) => {
+              if (err) {
+                reject({
+                  message: 'Determine zone failed',
+                  error: err
+                });
+                return;
+              }
+
+              zone = zoneInfo;
+
+              spinner
+                .succeed('Determine zone successed');
+
+              resolve();
+            }
+          );
+        }
+      );
+    }
+  )
+  .then(
     // 读取所有文件
     () => {
       spinner = ora('Loading files')
         .start();
+
       return Promise.all(
         tasks.map(
           ({ from, to }) => {
@@ -116,72 +149,86 @@ Promise
   .then(
     // 比对所有文件的hash
     () => {
-      const config = new qiniu.conf.Config();
-      const bucketManager = new qiniu.rs.BucketManager(mac, config);
+      const filePaths = [...fileMap.keys()];
+
+      const resFilePaths = [];
 
       let overrideFileCount = 0;
 
-      const tasks = [];
-      const filePaths = [...fileMap.keys()];
-      const resFilePaths = [];
-      while (filePaths.length) {
-        const curFilePaths = filePaths.splice(0, 1000);
-        tasks.push(
-          new Promise(
-            (resolve, reject) => {
-              bucketManager
-                .batch(
-                  curFilePaths.map(curFilePath => {
-                    return qiniu.rs.statOp(bucket, fileMap.get(curFilePath).distPath);
-                  }),
-                  (err, respBody, respInfo) => {
-                    if (err) {
-                      reject({
-                        message: 'Check files status failed',
-                        error: err
-                      });
-                      return;
-                    }
-                    if (
-                      parseInt(respInfo.statusCode / 100) !== 2
-                    ) {
-                      reject({
-                        message: `Check files status failed, code ${respInfo.statusCode}`,
-                        error: respBody
-                      });
-                      return;
-                    }
-                    respBody
-                      .forEach(
-                        (resp, i) => {
-                          const curFilePath = curFilePaths[i];
-                          const file = fileMap.get(curFilePath);
-                          if (resp.code !== 200 || resp.data.hash !== file.hash) {
-                            if (resp.code === 200 && resp.data.hash !== file.hash) {
-                              // 是覆盖
-                              file.isOverride = true;
-                              overrideFileCount++;
-                            }
-                            resFilePaths.push(curFilePath);
-                          }
-                        }
-                      );
-                    resolve();
-                  }
-                );
+      return new Promise(
+        (resolve, reject) => {
+
+          function compareHash() {
+            const curFilePaths = filePaths.splice(0, 1000);
+
+            if (curFilePaths.length === 0) {
+              resolve();
+              return;
             }
-          )
-        );
-      }
 
-      return Promise.all(tasks)
-        .then(
-          () => {
-            spinner.succeed(`Check files status successed, ${resFilePaths.length - overrideFileCount} created, ${overrideFileCount} modified, ${fileMap.size - resFilePaths.length} unmodifed`);
+            const config = new qiniu.conf.Config();
+            const bucketManager = new qiniu.rs.BucketManager(mac, config);
 
-            return resFilePaths;
+            bucketManager
+              .batch(
+                curFilePaths.map(
+                  curFilePath => {
+                    return qiniu.rs.statOp(
+                      bucket,
+                      fileMap.get(curFilePath).distPath
+                    );
+                  }
+                ),
+                (err, respBody, respInfo) => {
+                  if (err) {
+                    reject({
+                      message: 'Check files status failed',
+                      error: err
+                    });
+                    return;
+                  }
+
+                  if (
+                    parseInt(respInfo.statusCode / 100) !== 2
+                  ) {
+                    reject({
+                      message: `Check files status failed, code ${respInfo.statusCode}`,
+                      error: respBody
+                    });
+                    return;
+                  }
+
+                  respBody
+                    .forEach(
+                      (resp, i) => {
+                        const curFilePath = curFilePaths[i];
+                        const file = fileMap.get(curFilePath);
+                        if (resp.code !== 200 || resp.data.hash !== file.hash) {
+                          if (resp.code === 200 && resp.data.hash !== file.hash) {
+                            // 是覆盖
+                            file.isOverride = true;
+                            overrideFileCount++;
+                          }
+                          resFilePaths.push(curFilePath);
+                        }
+                      }
+                    );
+
+                  compareHash();
+                }
+              );
           }
-        );
+
+          compareHash();
+        }
+      )
+      .then(
+        () => {
+          spinner.succeed(`Check files status successed, ${resFilePaths.length - overrideFileCount} created, ${overrideFileCount} modified, ${fileMap.size - resFilePaths.length} unmodifed`);
+
+          return resFilePaths;
+        }
+      );
     }
   )
   .then(
@@ -195,58 +242,67 @@ Promise
         return [];
       }
 
-      const config = new qiniu.conf.Config();
-      const formUploader = new qiniu.form_up.FormUploader(config);
-
       const resFilePaths = [];
 
-      return Promise.all(
-        filePaths
-          .map(
-            filePath => {
-              const file = fileMap.get(filePath);
+      return new Promise(
+        (resolve, reject) => {
 
-              if (file.isOverride) {
-                // 只有需要覆盖的文件需要refreshUrl
-                resFilePaths.push(filePath);
-              }
+          function upload() {
+            const filePath = filePaths.pop();
 
-              var uploadToken = new qiniu.rs.PutPolicy(
-                {
-                  scope: file.isNew ? bucket : bucket + ':' + file.distPath
-                }
-              )
-                .uploadToken(mac);
-
-              return new Promise(
-                (resolve, reject) => {
-                  formUploader.putFile(
-                    uploadToken,
-                    file.distPath,
-                    file.srcPath,
-                    new qiniu.form_up.PutExtra(),
-                    (err, respBody, respInfo) => {
-                      if (err) {
-                        reject({
-                          message: 'Upload files failed',
-                          error: err
-                        });
-                        return;
-                      }
-                      if (respInfo.statusCode === 200) {
-                        resolve();
-                      } else {
-                        reject({
-                          message: `Upload files failed, code ${respInfo.statusCode}`,
-                          error: respBody
-                        });
-                      }
-                    }
-                  );
-                }
-              );
+            if (!filePath) {
+              resolve();
+              return;
             }
-          )
+
+            const file = fileMap.get(filePath);
+
+            if (file.isOverride) {
+              // 只有需要覆盖的文件需要refreshUrl
+              resFilePaths.push(filePath);
+            }
+
+            const uploadToken = new qiniu.rs.PutPolicy(
+              {
+                scope: file.isNew ? bucket : bucket + ':' + file.distPath
+              }
+            )
+              .uploadToken(mac);
+
+            const config = new qiniu.conf.Config();
+            config.zone = zone;
+
+            const formUploader = new qiniu.form_up.FormUploader(config);
+
+            formUploader.putFile(
+              uploadToken,
+              file.distPath,
+              file.srcPath,
+              new qiniu.form_up.PutExtra(),
+              (err, respBody, respInfo) => {
+                if (err) {
+                  reject({
+                    message: 'Upload files failed',
+                    error: err
+                  });
+                  return;
+                }
+
+                if (respInfo.statusCode === 200) {
+                  upload();
+                } else {
+                  reject({
+                    message: `Upload files failed, code ${respInfo.statusCode}`,
+                    error: respBody
+                  });
+                }
+              }
+            );
+          }
+
+          upload();
+
+        }
       )
       .then(
         () => {
@@ -282,42 +338,43 @@ Promise
           }
         );
 
-      const cdnManager = new qiniu.cdn.CdnManager(mac);
+      return new Promise(
+        (resolve, reject) => {
+          function refreshUrl() {
+            const curUrls = urls.splice(0, 100);
 
-      const tasks = [];
-
-      while (urls.length) {
-        const curUrls = urls.splice(0, 100);
-        tasks.push(
-          new Promise(
-            (resolve, reject) => {
-              cdnManager.refreshUrls(
-                curUrls,
-                (err, respBody, respInfo) => {
-                  if (err) {
-                    reject({
-                      message: 'Refresh urls failed',
-                      error: err
-                    });
-                    return;
-                  }
-                  if (respInfo.statusCode === 200) {
-                    resolve();
-                  } else {
-                    reject({
-                      message: `Refresh urls failed, code ${respInfo.statusCode}`,
-                      error: JSON.parse(respBody)
-                    });
-                  }
-                }
-              )
+            if (curUrls.length === 0) {
+              resolve();
+              return;
             }
-          )
-        )
-      }
 
-      return Promise.all(
-        tasks
+            const cdnManager = new qiniu.cdn.CdnManager(mac);
+
+            cdnManager.refreshUrls(
+              curUrls,
+              (err, respBody, respInfo) => {
+                if (err) {
+                  reject({
+                    message: 'Refresh urls failed',
+                    error: err
+                  });
+                  return;
+                }
+
+                if (respInfo.statusCode === 200) {
+                  refreshUrl();
+                } else {
+                  reject({
+                    message: `Refresh urls failed, code ${respInfo.statusCode}`,
+                    error: JSON.parse(respBody)
+                  });
+                }
+              }
+            );
+          }
+
+          refreshUrl();
+        }
       )
       .then(
         () => {
