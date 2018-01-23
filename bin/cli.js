@@ -14,7 +14,10 @@ const workspacePath = process.cwd();
 program
   .version(require('../package').version)
   .usage('[options]')
+  .option('--no-refresh', 'Skip refresh urls step')
   .parse(process.argv);
+
+const { refresh } = program;
 
 const { accessKey, secretKey, bucket, hosts, tasks } = require(path.join(workspacePath, 'package.json')).publishToQiniu;
 
@@ -320,6 +323,11 @@ Promise
       
       if (filePaths.length === 0) {
         spinner.info('Refresh urls skipped');
+        return;
+      }
+
+      if (!refresh) {
+        spinner.info('Refresh urls skipped by command');
         return;
       }
 
