@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const upath= require('upath');
 const program = require('commander');
 const glob = require('glob');
 const qiniu = require('qiniu');
@@ -100,7 +101,7 @@ Promise
                             filePath,
                             {
                               srcPath: srcFilePath,
-                              distPath: distFilePath
+                              distPath: upath.toUnix(distFilePath)
                             }
                           );
                         }
