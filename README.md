@@ -22,6 +22,7 @@
 
 ## 配置示例
 
+### 单bucket
 ```
   {
     "publishToQiniu": {
@@ -40,5 +41,37 @@
         }
       ]
     }
+  }
+```
+
+### 多bucket
+```
+  {
+    "publishToQiniu": [
+      {
+        "accessKey": "YOUR_ACCESS_KEY",
+        "secretKey": "YOUR_SECRECT_KEY",
+        "bucket": "YOUR_BUCKET_1",
+        "hosts": ["https://need-refresh-1.com"],
+        "tasks": [
+          {
+            "from": "src/1",
+            "to": "dist"
+          }
+        ]
+      },
+      {
+        "accessKey": "YOUR_ACCESS_KEY",
+        "secretKey": "YOUR_SECRECT_KEY",
+        "bucket": "YOUR_BUCKET_2",
+        "hosts": ["https://need-refresh-2.com"],
+        "tasks": [
+          {
+            "from": "src/2",
+            "to": "dist"
+          }
+        ]
+      }
+    ]
   }
 ```
